@@ -151,17 +151,33 @@ with st.sidebar:
 
 
 # -------------------------------
-# 5. INPUT
+# 5. INPUT (Enhanced)
 # -------------------------------
-st.subheader("Draw Molecule")
+st.subheader("Molecule Input")
 
-molecule_smiles = st_ketcher(key="ketcher_editor")
+input_mode = st.radio(
+    "Choose input method:",
+    ["Draw Molecule", "Enter SMILES"]
+)
 
-if not molecule_smiles:
-    smiles = "CNC1=CC=C(C=C1)C2=CC=CC=C2"
-    st.caption("Using default molecule")
-else:
-    smiles = molecule_smiles
+smiles = None
+
+if input_mode == "Draw Molecule":
+    molecule_smiles = st_ketcher(key="ketcher_editor")
+
+    if molecule_smiles:
+        smiles = molecule_smiles
+    else:
+        st.caption("Draw a molecule to begin")
+
+elif input_mode == "Enter SMILES":
+    smiles_input = st.text_input(
+        "Enter SMILES:",
+        value="CNC1=CC=C(C=C1)C2=CC=CC=C2"
+    )
+
+    if smiles_input:
+        smiles = smiles_input.strip()
 
 
 # -------------------------------
