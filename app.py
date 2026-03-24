@@ -105,3 +105,9 @@ if smiles:
             showmol(view, height=450, width=800)
     else:
         st.error("Invalid SMILES format.")
+
+st.sidebar.info("""
+**SMARTCyp Pro v1.0**
+Predicts metabolic sites for CYP3A4, 2D6, and 2C9.
+Built using RDKit and SMARTCyp 3.0 logic.
+""")
