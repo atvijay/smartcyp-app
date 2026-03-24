@@ -4,3 +4,4 @@ rdkit
 stmol
 py3Dmol
 ipython_genutils
+streamlit-ketcher
