@@ -9,14 +9,25 @@ from streamlit_ketcher import st_ketcher
 st.set_page_config(page_title="SMARTCyp Pro v2", layout="wide")
 
 # -------------------------------
-# 1. ATOM TYPING (Improved)
+# 0. SAFE UTILITIES
+# -------------------------------
+def safe_shortest_path_length(mol, idx1, idx2):
+    try:
+        path = Chem.GetShortestPath(mol, idx1, idx2)
+        return len(path) if path else 999
+    except:
+        return 999
+
+
+# -------------------------------
+# 1. ATOM TYPING
 # -------------------------------
 def get_atom_type(atom):
     symbol = atom.GetSymbol()
-    
+
     if atom.GetIsAromatic() and symbol == "C":
         return ("Aromatic_C", 62.0)
-    
+
     if symbol == "C":
         if atom.GetHybridization() == Chem.HybridizationType.SP3:
             h = atom.GetTotalNumHs()
@@ -26,46 +37,50 @@ def get_atom_type(atom):
                 return ("Secondary_C", 50.0)
             elif h == 1:
                 return ("Tertiary_C", 48.0)
-    
+
     if symbol == "N":
         return ("Amine_N", 45.0)
-    
+
     if symbol == "O":
         return ("Oxygen", 52.0)
 
     return ("Other", 80.0)
 
+
 # -------------------------------
-# 2. ACCESSIBILITY (Steric proxy)
+# 2. ACCESSIBILITY
 # -------------------------------
 def accessibility_score(atom):
     degree = atom.GetDegree()
     in_ring = atom.IsInRing()
-    
+
     penalty = 0
-    
+
     if degree >= 3:
         penalty += 5
-        
+
     if in_ring:
         penalty += 3
-        
+
     return penalty
 
+
 # -------------------------------
-# 3. MAIN ANALYSIS ENGINE
+# 3. ANALYSIS ENGINE
 # -------------------------------
 def analyze_isoform(mol, isoform_type):
     results = []
 
-    # Compute charges
-    AllChem.ComputeGasteigerCharges(mol)
+    # Safe charge calculation
+    try:
+        AllChem.ComputeGasteigerCharges(mol)
+    except:
+        pass
 
-    # Define anchors
     anchors_2d6 = mol.GetSubstructMatches(
         Chem.MolFromSmarts("[NX3;!$(NC=O)]")
     )
-    
+
     anchors_2c9 = mol.GetSubstructMatches(
         Chem.MolFromSmarts("C(=O)[O]")
     )
@@ -78,26 +93,25 @@ def analyze_isoform(mol, isoform_type):
 
         score = base_energy + acc
 
-        # Add charge contribution
+        # Charge contribution
         try:
             charge = float(atom.GetProp('_GasteigerCharge'))
-            score += abs(charge) * 5
+            if charge == charge:  # avoid NaN
+                score += abs(charge) * 5
         except:
             pass
 
-        # ---------------------------
-        # Isoform-specific corrections
-        # ---------------------------
+        # Isoform corrections
         if isoform_type == "CYP2D6" and anchors_2d6:
             distances = [
-                len(Chem.GetShortestPath(mol, idx, a[0]))
+                safe_shortest_path_length(mol, idx, a[0])
                 for a in anchors_2d6
             ]
             score += min(distances) * 1.5
 
         elif isoform_type == "CYP2C9" and anchors_2c9:
             distances = [
-                len(Chem.GetShortestPath(mol, idx, a[0]))
+                safe_shortest_path_length(mol, idx, a[0])
                 for a in anchors_2c9
             ]
             score += min(distances) * 1.2
@@ -110,13 +124,17 @@ def analyze_isoform(mol, isoform_type):
 
     df = pd.DataFrame(results)
 
-    # Normalize score
-    df["NormScore"] = (
-        (df["Score"] - df["Score"].min()) /
-        (df["Score"].max() - df["Score"].min() + 1e-6)
-    )
+    # Safe normalization
+    min_s = df["Score"].min()
+    max_s = df["Score"].max()
+
+    if max_s - min_s < 1e-6:
+        df["NormScore"] = 0.0
+    else:
+        df["NormScore"] = (df["Score"] - min_s) / (max_s - min_s)
 
     return df.sort_values("Score")
+
 
 # -------------------------------
 # 4. UI
@@ -131,8 +149,9 @@ with st.sidebar:
     )
     st.info(f"Analyzing for **{selected_isoform}**")
 
+
 # -------------------------------
-# 5. STRUCTURE INPUT
+# 5. INPUT
 # -------------------------------
 st.subheader("Draw Molecule")
 
@@ -144,20 +163,23 @@ if not molecule_smiles:
 else:
     smiles = molecule_smiles
 
+
 # -------------------------------
 # 6. ANALYSIS
 # -------------------------------
 if smiles:
     mol = Chem.MolFromSmiles(smiles)
 
-    if mol:
+    if mol is not None:
+        # Keep largest fragment only
+        frags = Chem.GetMolFrags(mol, asMols=True)
+        mol = max(frags, key=lambda m: m.GetNumAtoms())
+
         tab1, tab2, tab3 = st.tabs(
             ["📊 Single Isoform", "🏁 Comparison", "🧊 3D View"]
         )
 
-        # ---------------------------
         # TAB 1
-        # ---------------------------
         with tab1:
             df = analyze_isoform(mol, selected_isoform)
 
@@ -182,9 +204,7 @@ if smiles:
                     st.subheader("Scores")
                     st.dataframe(df, use_container_width=True)
 
-        # ---------------------------
         # TAB 2
-        # ---------------------------
         with tab2:
             cols = st.columns(3)
 
@@ -208,27 +228,32 @@ if smiles:
                         st.image(img)
                         st.dataframe(df_iso.head(5))
 
-        # ---------------------------
-        # TAB 3 (3D)
-        # ---------------------------
+        # TAB 3
         with tab3:
             st.subheader("3D Structure")
 
             m3d = Chem.AddHs(mol)
-            AllChem.EmbedMolecule(m3d, AllChem.ETKDG())
-            AllChem.MMFFOptimizeMolecule(m3d)
 
-            mblock = Chem.MolToMolBlock(m3d)
+            if AllChem.EmbedMolecule(m3d, AllChem.ETKDG()) == 0:
+                try:
+                    AllChem.MMFFOptimizeMolecule(m3d)
+                except:
+                    pass
 
-            view = py3Dmol.view(width=800, height=500)
-            view.addModel(mblock, 'mol')
-            view.setStyle({'stick': {}})
-            view.zoomTo()
+                mblock = Chem.MolToMolBlock(m3d)
 
-            showmol(view, height=500, width=800)
+                view = py3Dmol.view(width=800, height=500)
+                view.addModel(mblock, 'mol')
+                view.setStyle({'stick': {}})
+                view.zoomTo()
+
+                showmol(view, height=500, width=800)
+            else:
+                st.warning("3D generation failed for this molecule")
 
     else:
         st.error("Invalid SMILES")
+
 
 # -------------------------------
 # FOOTER
@@ -240,4 +265,5 @@ SMARTCyp Pro v2
 - Accessibility correction  
 - Charge contribution  
 - Isoform-aware penalties  
+- Stable & cloud-ready  
 """)
