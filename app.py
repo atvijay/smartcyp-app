@@ -51,27 +51,13 @@ def get_atom_type(atom):
 # 2. ACCESSIBILITY
 # -------------------------------
 def accessibility_score(atom):
-    degree = atom.GetDegree()
-    in_ring = atom.IsInRing()
-
     penalty = 0
-
-    if degree >= 3:
+    if atom.GetDegree() >= 3:
         penalty += 5
-
-    if in_ring:
+    if atom.IsInRing():
         penalty += 3
-
     return penalty
 
-csv = df.to_csv(index=False).encode('utf-8')
-
-st.download_button(
-    label="⬇️ Download Results as CSV",
-    data=csv,
-    file_name=f"{selected_isoform}_smartcyp_results.csv",
-    mime='text/csv',
-)
 
 # -------------------------------
 # 3. ANALYSIS ENGINE
@@ -79,7 +65,6 @@ st.download_button(
 def analyze_isoform(mol, isoform_type):
     results = []
 
-    # Safe charge calculation
     try:
         AllChem.ComputeGasteigerCharges(mol)
     except:
@@ -97,14 +82,12 @@ def analyze_isoform(mol, isoform_type):
         idx = atom.GetIdx()
 
         atom_type, base_energy = get_atom_type(atom)
-        acc = accessibility_score(atom)
+        score = base_energy + accessibility_score(atom)
 
-        score = base_energy + acc
-
-        # Charge contribution
+        # Charge
         try:
             charge = float(atom.GetProp('_GasteigerCharge'))
-            if charge == charge:  # avoid NaN
+            if charge == charge:
                 score += abs(charge) * 5
         except:
             pass
@@ -132,10 +115,8 @@ def analyze_isoform(mol, isoform_type):
 
     df = pd.DataFrame(results)
 
-    # Safe normalization
-    min_s = df["Score"].min()
-    max_s = df["Score"].max()
-
+    # Normalize
+    min_s, max_s = df["Score"].min(), df["Score"].max()
     if max_s - min_s < 1e-6:
         df["NormScore"] = 0.0
     else:
@@ -145,149 +126,166 @@ def analyze_isoform(mol, isoform_type):
 
 
 # -------------------------------
-# 4. UI
+# 4. METABOLITE GENERATION
 # -------------------------------
-st.title("🧪 SMARTCyp Pro v2 (Python Edition)")
+def generate_metabolites(mol, df):
+    metabolites = []
+    top_atoms = [int(x - 1) for x in df.head(3)["Atom"]]
+
+    for atom_idx in top_atoms:
+        atom = mol.GetAtomWithIdx(atom_idx)
+
+        # Hydroxylation
+        if atom.GetSymbol() == "C":
+            m = Chem.RWMol(mol)
+            o_idx = m.AddAtom(Chem.Atom("O"))
+            m.AddBond(atom_idx, o_idx, Chem.BondType.SINGLE)
+            try:
+                metabolites.append({
+                    "Type": "Hydroxylation",
+                    "Atom": atom_idx + 1,
+                    "SMILES": Chem.MolToSmiles(m)
+                })
+            except:
+                pass
+
+        # N-dealkylation
+        if atom.GetSymbol() == "N":
+            for nbr in atom.GetNeighbors():
+                if nbr.GetSymbol() == "C":
+                    m = Chem.RWMol(mol)
+                    m.RemoveBond(atom_idx, nbr.GetIdx())
+                    try:
+                        metabolites.append({
+                            "Type": "N-dealkylation",
+                            "Atom": atom_idx + 1,
+                            "SMILES": Chem.MolToSmiles(m)
+                        })
+                    except:
+                        pass
+                    break
+
+        # O-dealkylation
+        if atom.GetSymbol() == "O":
+            for nbr in atom.GetNeighbors():
+                if nbr.GetSymbol() == "C":
+                    m = Chem.RWMol(mol)
+                    m.RemoveBond(atom_idx, nbr.GetIdx())
+                    try:
+                        metabolites.append({
+                            "Type": "O-dealkylation",
+                            "Atom": atom_idx + 1,
+                            "SMILES": Chem.MolToSmiles(m)
+                        })
+                    except:
+                        pass
+                    break
+
+    return pd.DataFrame(metabolites)
+
+
+# -------------------------------
+# 5. UI
+# -------------------------------
+st.title("🧪 SMARTCyp Pro v2")
 
 with st.sidebar:
-    st.header("Settings")
     selected_isoform = st.selectbox(
-        "Select Isoform:",
+        "Isoform",
         ["CYP3A4", "CYP2D6", "CYP2C9"]
     )
-    st.info(f"Analyzing for **{selected_isoform}**")
-
 
 # -------------------------------
-# 5. INPUT (Enhanced)
+# INPUT
 # -------------------------------
 st.subheader("Molecule Input")
 
-input_mode = st.radio(
-    "Choose input method:",
-    ["Draw Molecule", "Enter SMILES"]
-)
-
+mode = st.radio("Input type:", ["Draw", "SMILES"])
 smiles = None
 
-if input_mode == "Draw Molecule":
-    molecule_smiles = st_ketcher(key="ketcher_editor")
+if mode == "Draw":
+    s = st_ketcher(key="ketcher")
+    if s:
+        smiles = s
+else:
+    s = st.text_input("Enter SMILES", "CNC1=CC=C(C=C1)C2=CC=CC=C2")
+    if s:
+        smiles = s.strip()
 
-    if molecule_smiles:
-        smiles = molecule_smiles
-    else:
-        st.caption("Draw a molecule to begin")
-
-elif input_mode == "Enter SMILES":
-    smiles_input = st.text_input(
-        "Enter SMILES:",
-        value="CNC1=CC=C(C=C1)C2=CC=CC=C2"
-    )
-
-    if smiles_input:
-        smiles = smiles_input.strip()
-
-
-# -------------------------------
-# 6. ANALYSIS
-# -------------------------------
 if smiles:
+    st.code(smiles)
+
     mol = Chem.MolFromSmiles(smiles)
 
-    if mol is not None:
-        # Keep largest fragment only
-        frags = Chem.GetMolFrags(mol, asMols=True)
-        mol = max(frags, key=lambda m: m.GetNumAtoms())
+    if mol:
+        # Largest fragment
+        mol = max(Chem.GetMolFrags(mol, asMols=True), key=lambda m: m.GetNumAtoms())
 
-        tab1, tab2, tab3 = st.tabs(
-            ["📊 Single Isoform", "🏁 Comparison", "🧊 3D View"]
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["Analysis", "Comparison", "3D", "Metabolites"]
         )
 
-        # TAB 1
+        # -------- TAB 1 --------
         with tab1:
             df = analyze_isoform(mol, selected_isoform)
 
-            if not df.empty:
-                c1, c2 = st.columns(2)
+            st.dataframe(df)
 
-                with c1:
-                    st.subheader("Top Metabolic Sites")
+            img = Draw.MolToImage(
+                mol,
+                highlightAtoms=[int(x - 1) for x in df.head(3)["Atom"]],
+                size=(400, 400)
+            )
+            st.image(img)
 
-                    top_atoms = [
-                        int(x - 1) for x in df.head(3)["Atom"]
-                    ]
+            # CSV download
+            df_exp = df.copy()
+            df_exp["SMILES"] = smiles
+            df_exp["Isoform"] = selected_isoform
 
-                    img = Draw.MolToImage(
-                        mol,
-                        size=(400, 400),
-                        highlightAtoms=top_atoms
-                    )
-                    st.image(img)
+            st.download_button(
+                "Download CSV",
+                df_exp.to_csv(index=False),
+                "results.csv"
+            )
 
-                with c2:
-                    st.subheader("Scores")
-                    st.dataframe(df, use_container_width=True)
-
-        # TAB 2
+        # -------- TAB 2 --------
         with tab2:
-            cols = st.columns(3)
+            for iso in ["CYP3A4", "CYP2D6", "CYP2C9"]:
+                st.subheader(iso)
+                df_iso = analyze_isoform(mol, iso)
+                st.dataframe(df_iso.head(5))
 
-            for i, iso in enumerate(["CYP3A4", "CYP2D6", "CYP2C9"]):
-                with cols[i]:
-                    st.markdown(f"**{iso}**")
-
-                    df_iso = analyze_isoform(mol, iso)
-
-                    if not df_iso.empty:
-                        top_atoms = [
-                            int(x - 1)
-                            for x in df_iso.head(3)["Atom"]
-                        ]
-
-                        img = Draw.MolToImage(
-                            mol,
-                            size=(300, 300),
-                            highlightAtoms=top_atoms
-                        )
-                        st.image(img)
-                        st.dataframe(df_iso.head(5))
-
-        # TAB 3
+        # -------- TAB 3 --------
         with tab3:
-            st.subheader("3D Structure")
-
             m3d = Chem.AddHs(mol)
-
-            if AllChem.EmbedMolecule(m3d, AllChem.ETKDG()) == 0:
-                try:
-                    AllChem.MMFFOptimizeMolecule(m3d)
-                except:
-                    pass
-
-                mblock = Chem.MolToMolBlock(m3d)
-
-                view = py3Dmol.view(width=800, height=500)
-                view.addModel(mblock, 'mol')
-                view.setStyle({'stick': {}})
+            if AllChem.EmbedMolecule(m3d) == 0:
+                view = py3Dmol.view(width=600, height=400)
+                view.addModel(Chem.MolToMolBlock(m3d), "mol")
+                view.setStyle({"stick": {}})
                 view.zoomTo()
+                showmol(view)
 
-                showmol(view, height=500, width=800)
+        # -------- TAB 4 --------
+        with tab4:
+            met_df = generate_metabolites(mol, df)
+
+            if not met_df.empty:
+                st.dataframe(met_df)
+
+                for _, row in met_df.iterrows():
+                    st.write(row["Type"])
+                    m = Chem.MolFromSmiles(row["SMILES"])
+                    if m:
+                        st.image(Draw.MolToImage(m))
+
+                st.download_button(
+                    "Download Metabolites",
+                    met_df.to_csv(index=False),
+                    "metabolites.csv"
+                )
             else:
-                st.warning("3D generation failed for this molecule")
+                st.info("No metabolites generated")
 
     else:
         st.error("Invalid SMILES")
-
-
-# -------------------------------
-# FOOTER
-# -------------------------------
-st.sidebar.markdown("---")
-st.sidebar.info("""
-SMARTCyp Pro v2  
-- Atom-type scoring  
-- Accessibility correction  
-- Charge contribution  
-- Isoform-aware penalties  
-- Stable & cloud-ready  
-""")
