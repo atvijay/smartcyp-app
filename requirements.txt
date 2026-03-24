@@ -1,6 +1,6 @@
 streamlit
 pandas
-rdkit-pypi
+rdkit
 stmol
 py3Dmol
 ipython_genutils
