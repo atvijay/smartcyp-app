@@ -289,3 +289,16 @@ if smiles:
 
     else:
         st.error("Invalid SMILES")
+
+# -------------------------------
+# FOOTER
+# -------------------------------
+st.sidebar.markdown("---")
+st.sidebar.info("""
+SMARTCyp Pro v2  
+- Atom-type scoring  
+- Accessibility correction  
+- Charge contribution  
+- Isoform-aware penalties  
+- Stable & cloud-ready  
+""")
