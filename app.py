@@ -209,7 +209,7 @@ def suggest_modifications(mol, df):
 # -------------------------------
 # UI
 # -------------------------------
-st.title("🧪 SMARTCyp Pro v3.1")
+st.title("SMARTCyp Pro v3.1")
 
 iso = st.sidebar.selectbox(
     "Isoform",
@@ -328,3 +328,8 @@ if smiles:
                 )
             else:
                 st.info("No optimization suggestions")
+st.sidebar.info("""
+**SMARTCyp Pro v3.1**
+Predicts metabolic sites for CYP3A4, 2D6, and 2C9.
+Built using RDKit and SMARTCyp 3.0 logic.
+""")
