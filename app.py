@@ -424,7 +424,7 @@ else:
 
         # Optimization
         with tab4:
-            st.subheader(" Metabolism-Guided Optimization")
+            st.subheader("Metabolism-Guided Optimization")
 
             opt_df = suggest_modifications(mol, df)
 
@@ -432,11 +432,11 @@ else:
                 st.dataframe(opt_df)
 
                 for _, row in opt_df.iterrows():
-                    st.write(f"{row['Strategy']} (Site {row['Site']})")
+                    st.write(f"**{row['Strategy']}** (Site {row['Site']})")
 
                     m = Chem.MolFromSmiles(row["SMILES"])
                     if m:
-                        st.image(Draw.MolToImage(m, size=(250,250)))
+                        st.image(Draw.MolToImage(m, size=(250, 250)))
 
                         # Evaluate improvement
                         new_df = analyze_isoform(m, iso)
@@ -446,9 +446,10 @@ else:
                             st.warning("No improvement ⚠️")
 
                 st.download_button(
-                    "Download Optimized Molecules",
-                    opt_df.to_csv(index=False),
-                    "optimized.csv"
+                    label="Download Optimized Molecules",
+                    data=opt_df.to_csv(index=False),
+                    file_name="optimized.csv",
+                    mime="text/csv"
                 )
             else:
                 st.info("No optimization suggestions")
