@@ -355,20 +355,21 @@ if smiles:
         )
 
         # Analysis
-        with tab1:             st.dataframe(df[["Atom","Type","Score","NormScore","GNN","FinalScore"]])
+with tab1:
+    st.dataframe(df[["Atom","Type","Score","NormScore","GNN","FinalScore"]])
 
-            img = Draw.MolToImage(
-                mol,
-                highlightAtoms=[int(x-1) for x in df.nsmallest(3, "FinalScore")["Atom"]],
-                size=(400,400)
-            )
-            st.image(img)
+    img = Draw.MolToImage(
+        mol,
+        highlightAtoms=[int(x-1) for x in df.nsmallest(3, "FinalScore")["Atom"]],
+        size=(400,400)
+    )
+    st.image(img)
 
-            st.download_button(
-                "Download CSV",
-                df.to_csv(index=False),
-                "results.csv"
-            )
+    st.download_button(
+        "Download CSV",
+        df.to_csv(index=False),
+        "results.csv"
+    )
 
         # 3D
         with tab2:
