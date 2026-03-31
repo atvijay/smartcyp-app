@@ -371,15 +371,15 @@ with tab1:
         "results.csv"
     )
 
-        # 3D
-        with tab2:
-            m3d = Chem.AddHs(mol)
-            if AllChem.EmbedMolecule(m3d) == 0:
-                view = py3Dmol.view(width=600, height=400)
-                view.addModel(Chem.MolToMolBlock(m3d), "mol")
-                view.setStyle({"stick": {}})
-                view.zoomTo()
-                showmol(view)
+# 3D
+with tab2:
+    m3d = Chem.AddHs(mol)
+    if AllChem.EmbedMolecule(m3d) == 0:
+        view = py3Dmol.view(width=600, height=400)
+        view.addModel(Chem.MolToMolBlock(m3d), "mol")
+        view.setStyle({"stick": {}})
+        view.zoomTo()
+        showmol(view)
 
         # Metabolites
         with tab3:
