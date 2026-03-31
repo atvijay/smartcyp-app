@@ -179,26 +179,25 @@ def analyze_isoform(mol, isoform):
     df = pd.DataFrame(results)
 
     df["NormScore"] = (
-    (df["Score"] - df["Score"].min()) /
-    (df["Score"].max() - df["Score"].min() + 1e-6)
-)
+        (df["Score"] - df["Score"].min()) /
+        (df["Score"].max() - df["Score"].min() + 1e-6)
+    )
 
-# 🔥 RUN GNN HERE
-try:
-    gnn_scores = run_gnn(mol, df)
-    df["GNN"] = gnn_scores
+    # 🔥 GNN integration
+    try:
+        gnn_scores = run_gnn(mol, df)
+        df["GNN"] = gnn_scores
+        df["GNN"] = 1 - df["GNN"]
 
-    df["GNN"] = 1 - df["GNN"]
+        alpha = 0.6
+        df["FinalScore"] = alpha * df["NormScore"] + (1 - alpha) * df["GNN"]
 
-    alpha = 0.6
-    df["FinalScore"] = alpha * df["NormScore"] + (1 - alpha) * df["GNN"]
+    except Exception as e:
+        df["GNN"] = 0.0
+        df["FinalScore"] = df["NormScore"]
 
-except Exception as e:
-    df["GNN"] = 0.0
-    df["FinalScore"] = df["NormScore"]
-
-# Sort by FINAL score instead
-return df.sort_values("FinalScore")
+    # ✅ THIS MUST BE INDENTED
+    return df.sort_values("FinalScore")
 
 
 
