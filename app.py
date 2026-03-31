@@ -357,21 +357,21 @@ if smiles:
     mol = Chem.MolFromSmiles(smiles)
 
     if mol:
-        # 1. Standardize the molecule
+        # 1. Pre-process molecule (get largest fragment)
         mol = max(
             Chem.GetMolFrags(mol, asMols=True),
             key=lambda m: m.GetNumAtoms()
         )
 
-        # 2. Run analysis
+        # 2. Perform main analysis
         df = analyze_isoform(mol, iso)
 
-        # 3. Create the tabs
+        # 3. Initialize Tabs
         tab1, tab2, tab3, tab4 = st.tabs(
             ["Analysis", "3D", "Metabolites", "Optimization"]
         )
 
-        # Analysis Tab
+        # --- TAB 1: Analysis ---
         with tab1:
             st.subheader("Site of Metabolism Prediction")
             st.dataframe(df[["Atom", "Type", "Score", "NormScore", "GNN", "FinalScore"]])
@@ -391,7 +391,7 @@ if smiles:
                 mime="text/csv"
             )
 
-        # 3D Tab
+        # --- TAB 2: 3D View ---
         with tab2:
             st.subheader("3D Conformational View")
             m3d = Chem.AddHs(mol)
@@ -405,12 +405,31 @@ if smiles:
             else:
                 st.warning("Could not generate 3D coordinates.")
 
-        # Metabolites Tab
+        # --- TAB 3: Metabolites (NEWLY ADDED) ---
         with tab3:
             st.subheader("Predicted Metabolites")
-            st.write("Metabolite prediction logic goes here.")
-            
-        # Optimization Tab (FIXED INDENTATION)
+            met_df = generate_metabolites_v3(mol, df)
+
+            if not met_df.empty:
+                st.dataframe(met_df)
+
+                for _, row in met_df.iterrows():
+                    st.write(f"**{row['Reaction']}** (Site {row['Site']})")
+                    
+                    m_met = Chem.MolFromSmiles(row["SMILES"])
+                    if m_met:
+                        st.image(Draw.MolToImage(m_met, size=(250, 250)))
+
+                st.download_button(
+                    label="Download Metabolites CSV",
+                    data=met_df.to_csv(index=False),
+                    file_name="metabolites.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No metabolites predicted for this molecule.")
+
+        # --- TAB 4: Optimization ---
         with tab4:
             st.subheader("Metabolism-Guided Optimization")
             opt_df = suggest_modifications(mol, df)
@@ -437,12 +456,12 @@ if smiles:
                     mime="text/csv"
                 )
             else:
-                st.info("No optimization suggestions available for this molecule.")
+                st.info("No optimization suggestions available.")
 
     else:
         st.error("Invalid SMILES string. Please check your input.")
 else:
-    st.info("Please enter a SMILES string in the sidebar or input box to begin.")
+    st.info("Please enter a SMILES string to begin.")
 st.sidebar.info("""
 **SMARTCyp Pro v3.1**
 Predicts metabolic sites for CYP3A4, 2D6, and 2C9.
