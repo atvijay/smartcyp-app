@@ -23,20 +23,24 @@ st.set_page_config(page_title="SMARTCyp Pro v3.1", layout="wide")
 # model.load_state_dict(torch.load(path))
 
 @st.cache_resource
-def load_gnn_model():
+def get_gnn_model():
+    # 1. Initialize the architecture (Your GNN class)
+    model = MyGNNClass() # Replace with your actual class name
+    
+    # 2. Check if a trained version exists
     current_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(current_dir, "smartcyp_gnn.pt")
     
-    # Check if file exists to provide a helpful error message
-    if not os.path.exists(model_path):
-        st.error(f"Error: {model_path} not found in repository!")
-        st.stop()
+    if os.path.exists(model_path):
+        # Load weights if they exist
+        model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    else:
+        # OPTIONAL: Run your training function here if the file is missing
+        st.info("No pre-trained model found. Training new model... please wait.")
+        # train_my_model(model) 
         
-    # Load model
-    model = torch.load(model_path, map_location=torch.device("cpu"))
     model.eval()
     return model
-
 # 3. Now load the model
 gnn_model = load_gnn_model()
 
