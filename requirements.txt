@@ -5,3 +5,8 @@ stmol
 py3Dmol
 ipython_genutils
 streamlit-ketcher
+torch
+torchvision
+torchaudio
+torch-geometric
+numpy
