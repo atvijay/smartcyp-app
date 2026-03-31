@@ -445,6 +445,16 @@ else:
                         else:
                             st.warning("No improvement ⚠️")
 
+                # Proper download button formatting
+                st.download_button(
+                    label="Download Optimized Molecules",
+                    data=opt_df.to_csv(index=False),
+                    file_name="optimized.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No optimization suggestions")
+
                 st.download_button(
                     label="Download Optimized Molecules",
                     data=opt_df.to_csv(index=False),
