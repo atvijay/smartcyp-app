@@ -357,28 +357,25 @@ if smiles:
     mol = Chem.MolFromSmiles(smiles)
 
     if mol:
-        # Get the largest fragment (standardizing the input)
+        # 1. Standardize the molecule
         mol = max(
             Chem.GetMolFrags(mol, asMols=True),
             key=lambda m: m.GetNumAtoms()
         )
 
-        # Run your analysis
+        # 2. Run analysis
         df = analyze_isoform(mol, iso)
 
-        # Define tabs INSIDE the if-block
+        # 3. Create the tabs
         tab1, tab2, tab3, tab4 = st.tabs(
             ["Analysis", "3D", "Metabolites", "Optimization"]
         )
-
-        # --- Everything below must be indented to stay inside "if mol:" ---
 
         # Analysis Tab
         with tab1:
             st.subheader("Site of Metabolism Prediction")
             st.dataframe(df[["Atom", "Type", "Score", "NormScore", "GNN", "FinalScore"]])
 
-            # Generate the 2D molecule image with highlighted atoms
             top_atoms = [int(x-1) for x in df.nsmallest(3, "FinalScore")["Atom"]]
             img = Draw.MolToImage(
                 mol,
@@ -399,33 +396,23 @@ if smiles:
             st.subheader("3D Conformational View")
             m3d = Chem.AddHs(mol)
             if AllChem.EmbedMolecule(m3d) == 0:
-                AllChem.MMFFOptimizeMolecule(m3d) # Optional: cleans up the structure
+                AllChem.MMFFOptimizeMolecule(m3d)
                 view = py3Dmol.view(width=600, height=400)
                 view.addModel(Chem.MolToMolBlock(m3d), "mol")
                 view.setStyle({"stick": {}, "sphere": {"radius": 0.3}})
                 view.zoomTo()
                 showmol(view)
             else:
-                st.warning("Could not generate 3D coordinates for this molecule.")
+                st.warning("Could not generate 3D coordinates.")
 
-        # Placeholder for other tabs to prevent errors
+        # Metabolites Tab
         with tab3:
+            st.subheader("Predicted Metabolites")
             st.write("Metabolite prediction logic goes here.")
             
-        with tab4:
-            st.write("Optimization parameters goes here.")
-
-    else:
-        # If Chem.MolFromSmiles fails
-        st.error("Invalid SMILES string. Please check your input.")
-else:
-    # Initial state when the app opens
-    st.info("Please enter a SMILES string in the sidebar or input box to begin.")
-
-        # Optimization
+        # Optimization Tab (FIXED INDENTATION)
         with tab4:
             st.subheader("Metabolism-Guided Optimization")
-
             opt_df = suggest_modifications(mol, df)
 
             if not opt_df.empty:
@@ -433,19 +420,16 @@ else:
 
                 for _, row in opt_df.iterrows():
                     st.write(f"**{row['Strategy']}** (Site {row['Site']})")
+                    m_opt = Chem.MolFromSmiles(row["SMILES"])
+                    if m_opt:
+                        st.image(Draw.MolToImage(m_opt, size=(250, 250)))
 
-                    m = Chem.MolFromSmiles(row["SMILES"])
-                    if m:
-                        st.image(Draw.MolToImage(m, size=(250, 250)))
-
-                        # Evaluate improvement
-                        new_df = analyze_isoform(m, iso)
+                        new_df = analyze_isoform(m_opt, iso)
                         if new_df["FinalScore"].min() < df["FinalScore"].min():
                             st.success("Improved metabolic stability ✅")
                         else:
                             st.warning("No improvement ⚠️")
 
-                # Proper download button formatting
                 st.download_button(
                     label="Download Optimized Molecules",
                     data=opt_df.to_csv(index=False),
@@ -453,16 +437,12 @@ else:
                     mime="text/csv"
                 )
             else:
-                st.info("No optimization suggestions")
+                st.info("No optimization suggestions available for this molecule.")
 
-                st.download_button(
-                    label="Download Optimized Molecules",
-                    data=opt_df.to_csv(index=False),
-                    file_name="optimized.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.info("No optimization suggestions")
+    else:
+        st.error("Invalid SMILES string. Please check your input.")
+else:
+    st.info("Please enter a SMILES string in the sidebar or input box to begin.")
 st.sidebar.info("""
 **SMARTCyp Pro v3.1**
 Predicts metabolic sites for CYP3A4, 2D6, and 2C9.
