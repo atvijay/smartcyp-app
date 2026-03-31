@@ -6,12 +6,24 @@ from rdkit.Chem import rdChemReactions
 from stmol import showmol
 import py3Dmol
 from streamlit_ketcher import st_ketcher
+# GNN IMPORTS
+import torch
+from torch_geometric.data import Data
+
+# Load model once (cache for Streamlit)
+@st.cache_resource
+def load_gnn_model():
+    model = torch.load("smartcyp_gnn.pt", map_location=torch.device("cpu"))
+    model.eval()
+    return model
+
+gnn_model = load_gnn_model()
 
 st.set_page_config(page_title="SMARTCyp Pro v3.1", layout="wide")
 
-# -------------------------------
+
 # UTILITIES
-# -------------------------------
+
 def safe_shortest_path_length(mol, idx1, idx2):
     try:
         path = Chem.GetShortestPath(mol, idx1, idx2)
@@ -19,37 +31,115 @@ def safe_shortest_path_length(mol, idx1, idx2):
     except:
         return 999
 
+def build_gnn_graph(mol, smartcyp_scores):
+    node_features = []
 
-# -------------------------------
-# ATOM TYPING
-# -------------------------------
+    for atom in mol.GetAtoms():
+        idx = atom.GetIdx()
+
+        # Basic RDKit features
+        rdkit_feats = [
+            atom.GetAtomicNum(),
+            atom.GetDegree(),
+            int(atom.GetIsAromatic()),
+        ]
+
+        # SMARTCyp features
+        sc = smartcyp_scores[idx]
+        smartcyp_feats = [
+            sc["Score"],
+            sc["NormScore"]
+        ]
+
+        node_features.append(rdkit_feats + smartcyp_feats)
+
+    x = torch.tensor(node_features, dtype=torch.float)
+
+    edge_index = []
+    for bond in mol.GetBonds():
+        i = bond.GetBeginAtomIdx()
+        j = bond.GetEndAtomIdx()
+        edge_index.append([i, j])
+        edge_index.append([j, i])
+
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+
+    return Data(x=x, edge_index=edge_index)
+
+def run_gnn(mol, df):
+    # Convert df → list of dicts (indexed by atom)
+    smartcyp_scores = df.to_dict("records")
+
+    graph = build_gnn_graph(mol, smartcyp_scores)
+
+    with torch.no_grad():
+        preds = gnn_model(graph.x, graph.edge_index)
+
+    preds = preds.squeeze().numpy()
+
+    return preds
+
+
+
+# Reactivity rules
+
 def get_atom_type(atom):
-    if atom.GetIsAromatic() and atom.GetSymbol() == "C":
+    sym = atom.GetSymbol()
+
+    # Aromatic carbon
+    if atom.GetIsAromatic() and sym == "C":
         return ("Aromatic_C", 62.0)
 
-    if atom.GetSymbol() == "C":
-        if atom.GetHybridization() == Chem.HybridizationType.SP3:
-            h = atom.GetTotalNumHs()
-            if h == 3: return ("Primary_C", 55.0)
-            elif h == 2: return ("Secondary_C", 50.0)
-            elif h == 1: return ("Tertiary_C", 48.0)
+    # Benzylic (VERY important in CYP metabolism)
+    if sym == "C" and atom.GetHybridization() == Chem.HybridizationType.SP3:
+        for nbr in atom.GetNeighbors():
+            if nbr.GetIsAromatic():
+                return ("Benzylic_C", 40.0)  # HIGH reactivity
 
-    if atom.GetSymbol() == "N": return ("Amine_N", 45.0)
-    if atom.GetSymbol() == "O": return ("Oxygen", 52.0)
+    # Allylic
+    if sym == "C":
+        for bond in atom.GetBonds():
+            if bond.GetBondType() == Chem.BondType.DOUBLE:
+                return ("Allylic_C", 45.0)
+
+    # sp3 carbon types
+    if sym == "C" and atom.GetHybridization() == Chem.HybridizationType.SP3:
+        h = atom.GetTotalNumHs()
+        if h == 3: return ("Primary_C", 55.0)
+        elif h == 2: return ("Secondary_C", 50.0)
+        elif h == 1: return ("Tertiary_C", 48.0)
+
+    # Heteroatoms
+    if sym == "N": return ("Amine_N", 45.0)
+    if sym == "O": return ("Oxygen", 52.0)
+    if sym == "S": return ("Sulfur", 45.0)
 
     return ("Other", 80.0)
 
 
+
+# Accessibility 
+
 def accessibility_score(atom):
     score = 0
-    if atom.GetDegree() >= 3: score += 5
-    if atom.IsInRing(): score += 3
+
+    # steric hindrance
+    degree = atom.GetDegree()
+    score += degree * 2
+
+    # ring penalty (less accessible)
+    if atom.IsInRing():
+        score += 3
+
+    # aromatic ring penalty
+    if atom.GetIsAromatic():
+        score += 2
+
     return score
 
 
-# -------------------------------
-# SMARTCYP SCORING
-# -------------------------------
+# SCORING
+
 def analyze_isoform(mol, isoform):
     results = []
 
@@ -89,16 +179,31 @@ def analyze_isoform(mol, isoform):
     df = pd.DataFrame(results)
 
     df["NormScore"] = (
-        (df["Score"] - df["Score"].min()) /
-        (df["Score"].max() - df["Score"].min() + 1e-6)
-    )
+    (df["Score"] - df["Score"].min()) /
+    (df["Score"].max() - df["Score"].min() + 1e-6)
+)
 
-    return df.sort_values("Score")
+# 🔥 RUN GNN HERE
+try:
+    gnn_scores = run_gnn(mol, df)
+    df["GNN"] = gnn_scores
+
+    df["GNN"] = 1 - df["GNN"]
+
+    alpha = 0.6
+    df["FinalScore"] = alpha * df["NormScore"] + (1 - alpha) * df["GNN"]
+
+except Exception as e:
+    df["GNN"] = 0.0
+    df["FinalScore"] = df["NormScore"]
+
+# Sort by FINAL score instead
+return df.sort_values("FinalScore")
 
 
-# -------------------------------
-# METABOLITE GENERATION (v3)
-# -------------------------------
+
+# METABOLITE GENERATION 
+
 def generate_metabolites_v3(mol, df):
     metabolites = []
 
@@ -161,9 +266,9 @@ def generate_metabolites_v3(mol, df):
     return pd.DataFrame(metabolites).drop_duplicates()
 
 
-# -------------------------------
-# AGENTIC OPTIMIZATION
-# -------------------------------
+
+# OPTIMIZATION
+
 def suggest_modifications(mol, df):
     suggestions = []
 
@@ -206,9 +311,9 @@ def suggest_modifications(mol, df):
     return pd.DataFrame(suggestions).drop_duplicates()
 
 
-# -------------------------------
+
 # UI
-# -------------------------------
+
 st.title("SMARTCyp Pro v3.1")
 
 iso = st.sidebar.selectbox(
@@ -231,9 +336,9 @@ else:
     if s:
         smiles = s.strip()
 
-# -------------------------------
+
 # MAIN APP
-# -------------------------------
+
 if smiles:
     mol = Chem.MolFromSmiles(smiles)
 
@@ -250,12 +355,11 @@ if smiles:
         )
 
         # Analysis
-        with tab1:
-            st.dataframe(df)
+        with tab1:             st.dataframe(df[["Atom","Type","Score","NormScore","GNN","FinalScore"]])
 
             img = Draw.MolToImage(
                 mol,
-                highlightAtoms=[int(x-1) for x in df.head(3)["Atom"]],
+                highlightAtoms=[int(x-1) for x in df.nsmallest(3, "FinalScore")["Atom"]],
                 size=(400,400)
             )
             st.image(img)
@@ -300,7 +404,7 @@ if smiles:
 
         # Optimization
         with tab4:
-            st.subheader("🧠 Metabolism-Guided Optimization")
+            st.subheader(" Metabolism-Guided Optimization")
 
             opt_df = suggest_modifications(mol, df)
 
@@ -316,7 +420,7 @@ if smiles:
 
                         # Evaluate improvement
                         new_df = analyze_isoform(m, iso)
-                        if new_df["Score"].min() < df["Score"].min():
+                        if new_df["FinalScore"].min() < df["FinalScore"].min():
                             st.success("Improved metabolic stability ✅")
                         else:
                             st.warning("No improvement ⚠️")
