@@ -10,16 +10,35 @@ from streamlit_ketcher import st_ketcher
 import torch
 from torch_geometric.data import Data
 
-# Load model once (cache for Streamlit)
+import os
+
+# 1. MUST BE THE VERY FIRST STREAMLIT COMMAND
+st.set_page_config(page_title="SMARTCyp Pro v3.1", layout="wide")
+
+# 2. Define your GNN Class here (or import it)
+# If your model was saved as a state_dict, you need the class architecture:
+# class MyGNN(torch.nn.Module):
+#     ...
+# model = MyGNN()
+# model.load_state_dict(torch.load(path))
+
 @st.cache_resource
 def load_gnn_model():
-    model = torch.load("smartcyp_gnn.pt", map_location=torch.device("cpu"))
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(current_dir, "smartcyp_gnn.pt")
+    
+    # Check if file exists to provide a helpful error message
+    if not os.path.exists(model_path):
+        st.error(f"Error: {model_path} not found in repository!")
+        st.stop()
+        
+    # Load model
+    model = torch.load(model_path, map_location=torch.device("cpu"))
     model.eval()
     return model
 
+# 3. Now load the model
 gnn_model = load_gnn_model()
-
-st.set_page_config(page_title="SMARTCyp Pro v3.1", layout="wide")
 
 
 # UTILITIES
